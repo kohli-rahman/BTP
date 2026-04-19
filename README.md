@@ -10,6 +10,6 @@
 
 Phase 1 :   WP1 — Data collection pipelines (social, news, web)
 
-Social media - twitter/x , reddit , facebook , instagram
-News - Pulls English news articles from NewsAPI.org matching disaster keywords.
-web - weather information
+Social media - twitter/x , reddit , facebook , instagram \
+News - Pulls English news articles from NewsAPI.org matching disaster keywords. \
+web - weather information \
