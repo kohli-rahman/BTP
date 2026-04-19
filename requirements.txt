@@ -1,0 +1,27 @@
+# WP1 Data Collection Pipeline — Dependencies
+# IIT Patna | DST Multi-Hazard Early Warning System
+
+# ── Core HTTP & parsing ─────────────────────────────────────────────────────
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+feedparser>=6.0.10
+lxml>=5.1.0
+
+# ── Social media ────────────────────────────────────────────────────────────
+tweepy>=4.14.0          # Twitter API v2 (batch + streaming)
+praw>=7.7.1             # Reddit API
+
+# ── News ────────────────────────────────────────────────────────────────────
+newsapi-python>=0.2.7
+
+# ── Media processing ────────────────────────────────────────────────────────
+Pillow>=10.2.0          # Image dimension reading & validation
+
+# ── Configuration ───────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ── Logging ─────────────────────────────────────────────────────────────────
+loguru>=0.7.2
+
+# ── Typing (Python 3.9 backport) ────────────────────────────────────────────
+typing-extensions>=4.9.0
