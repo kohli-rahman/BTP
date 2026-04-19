@@ -44,16 +44,31 @@ class RSSCollector(BaseCollector):
         return None
 
     def _scrape_body(self, url: str) -> tuple[str, list[str]]:
-        """Return (body_text, image_urls) by fetching and parsing the article HTML."""
+        """
+        Return (body_text, [og_image_url]).
+        Uses Open Graph og:image — the article's primary image — instead of
+        scraping every <img> tag on the page (which picks up logos, ads, icons).
+        """
         try:
             resp = requests.get(url, timeout=10, headers={"User-Agent": "DisasterBot/1.0"})
             if resp.status_code != 200:
                 return "", []
             soup = BeautifulSoup(resp.text, "html.parser")
+
             paragraphs = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
-            text = " ".join(paragraphs)[:3000]  # cap at 3 KB per article
-            images = [img["src"] for img in soup.find_all("img", src=True) if img["src"].startswith("http")][:5]
-            return text, images
+            text = " ".join(paragraphs)[:3000]
+
+            # Prefer og:image (article hero image) over arbitrary <img> tags
+            og_image = soup.find("meta", property="og:image")
+            if og_image and og_image.get("content", "").startswith("http"):
+                return text, [og_image["content"]]
+
+            # Fallback: twitter:image card
+            tw_image = soup.find("meta", attrs={"name": "twitter:image"})
+            if tw_image and tw_image.get("content", "").startswith("http"):
+                return text, [tw_image["content"]]
+
+            return text, []
         except Exception as e:
             logger.debug(f"[RSSCollector] Scrape failed for {url}: {e}")
             return "", []

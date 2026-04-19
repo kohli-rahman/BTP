@@ -1,5 +1,6 @@
 # Data and logs
-data/
+data/media/images
+
 
 # Python
 __pycache__/

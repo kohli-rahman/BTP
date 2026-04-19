@@ -95,10 +95,11 @@ class RedditCollector(BaseCollector):
             except Exception as e:
                 logger.error(f"[RedditCollector] Failed on r/{sub_name}: {e}")
 
-        # Also run a global search for each keyword
-        for keyword in DISASTER_KEYWORDS[:5]:
+        # Keyword search scoped to India-focused subreddits
+        india_sub = self._reddit.subreddit("+".join(DISASTER_SUBREDDITS))
+        for keyword in DISASTER_KEYWORDS[:8]:
             try:
-                for post in self._reddit.subreddit("all").search(keyword, sort="new", limit=50, time_filter="week"):
+                for post in india_sub.search(keyword, sort="new", limit=50, time_filter="week"):
                     if post.created_utc < cutoff_ts:
                         continue
                     record = self._parse_submission(post)

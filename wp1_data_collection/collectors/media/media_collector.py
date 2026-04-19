@@ -1,8 +1,7 @@
 import hashlib
-import mimetypes
-import os
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -10,27 +9,38 @@ import requests
 from PIL import Image
 
 from wp1_data_collection.collectors.base_collector import BaseCollector
-from wp1_data_collection.config.settings import RAW_DIR
+from wp1_data_collection.config.settings import RAW_DIR, INDIA_MEDIA_DOMAINS
 from wp1_data_collection.storage.schema import MediaRecord, MediaType
-from wp1_data_collection.storage.data_store import DataStore
 from wp1_data_collection.utils.logger import logger
-from wp1_data_collection.utils.rate_limiter import retry_on_rate_limit
 
 MEDIA_DIR = RAW_DIR / "media"
 
 SUPPORTED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".tiff"}
 SUPPORTED_VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 
-MAX_FILE_SIZE_MB = 50
+MAX_FILE_SIZE_MB = 10
+MIN_IMAGE_WIDTH  = 300   # pixels — skip icons, thumbnails, logos
+MIN_IMAGE_HEIGHT = 200
+
+# URL patterns that reliably indicate non-article media (logos, trackers, icons)
+_SKIP_URL_PATTERNS = re.compile(
+    r"(logo|icon|avatar|banner|pixel|tracker|badge|button|sprite|widget|"
+    r"gravatar|favicon|ads|advert|analytics|1x1|blank\.|spacer)",
+    re.IGNORECASE,
+)
+
+DOWNLOAD_TIMEOUT  = 8    # seconds — fail fast rather than hang
+MAX_WORKERS       = 4    # concurrent downloads
 
 
 class MediaCollector(BaseCollector):
     """
-    Downloads images and videos referenced by previously collected RawRecords.
-    Reads media_urls from existing records in the data store, downloads and
-    validates each file, and stores a MediaRecord with local path reference.
+    Downloads disaster-relevant images/videos from previously collected RawRecords.
 
-    Can also accept a direct list of URLs for standalone use.
+    Relevance rules applied before downloading:
+      1. Source record must have at least one disaster keyword hit.
+      2. URL must not match known logo/icon/tracker patterns.
+      3. After download, image must be >= MIN_IMAGE_WIDTH x MIN_IMAGE_HEIGHT pixels.
     """
 
     def __init__(self, **kwargs):
@@ -38,8 +48,23 @@ class MediaCollector(BaseCollector):
         MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
     def authenticate(self) -> bool:
-        # No auth — uses public URLs from collected records
         return True
+
+    # ── Filtering helpers ──────────────────────────────────────────────────
+
+    def _is_relevant_url(self, url: str) -> bool:
+        """
+        Two-pass filter:
+          1. Reject URLs matching logo/icon/tracker patterns.
+          2. Accept only images hosted on known Indian news domains so foreign
+             stock photos and international CDNs are excluded.
+        """
+        if _SKIP_URL_PATTERNS.search(url):
+            return False
+        hostname = urlparse(url).hostname or ""
+        # strip www. prefix for matching
+        hostname = hostname.removeprefix("www.")
+        return any(hostname == d or hostname.endswith("." + d) for d in INDIA_MEDIA_DOMAINS)
 
     def _detect_media_type(self, url: str, content_type: str = "") -> Optional[MediaType]:
         ext = Path(urlparse(url).path).suffix.lower()
@@ -59,23 +84,6 @@ class MediaCollector(BaseCollector):
         dest.mkdir(parents=True, exist_ok=True)
         return dest / f"{url_hash}{ext}"
 
-    @retry_on_rate_limit(max_retries=2, base_wait=5.0)
-    def _download(self, url: str) -> tuple[Optional[bytes], str]:
-        resp = requests.get(
-            url,
-            timeout=30,
-            stream=True,
-            headers={"User-Agent": "DisasterBot/1.0"},
-        )
-        if resp.status_code != 200:
-            return None, ""
-        content_type = resp.headers.get("Content-Type", "")
-        size = int(resp.headers.get("Content-Length", 0))
-        if size > MAX_FILE_SIZE_MB * 1024 * 1024:
-            logger.warning(f"[MediaCollector] Skipping oversized file: {url}")
-            return None, content_type
-        return resp.content, content_type
-
     def _get_image_dimensions(self, path: Path) -> tuple[Optional[int], Optional[int]]:
         try:
             with Image.open(path) as img:
@@ -83,24 +91,56 @@ class MediaCollector(BaseCollector):
         except Exception:
             return None, None
 
+    # ── Download ───────────────────────────────────────────────────────────
+
     def _download_one(self, url: str, source_record_id: str = None) -> Optional[MediaRecord]:
-        content, content_type = self._download(url)
-        if not content:
+        if not self._is_relevant_url(url):
+            logger.debug(f"[MediaCollector] Skipped (pattern filter): {url}")
             return None
 
+        try:
+            resp = requests.get(
+                url,
+                timeout=DOWNLOAD_TIMEOUT,
+                stream=True,
+                headers={"User-Agent": "DisasterBot/1.0"},
+            )
+        except Exception as e:
+            logger.debug(f"[MediaCollector] Request failed: {url} — {e}")
+            return None
+
+        if resp.status_code != 200:
+            return None
+
+        content_type = resp.headers.get("Content-Type", "")
         media_type = self._detect_media_type(url, content_type)
         if not media_type:
-            logger.debug(f"[MediaCollector] Unknown media type, skipping: {url}")
+            return None
+
+        # Skip oversized files
+        size_header = int(resp.headers.get("Content-Length", 0))
+        if size_header > MAX_FILE_SIZE_MB * 1024 * 1024:
+            logger.debug(f"[MediaCollector] Skipped (too large): {url}")
+            return None
+
+        try:
+            content = resp.content
+        except Exception:
             return None
 
         local_path = self._local_path(url, media_type)
-        if local_path.exists():
-            logger.debug(f"[MediaCollector] Already downloaded: {local_path.name}")
-        else:
+        if not local_path.exists():
             local_path.write_bytes(content)
 
         size_kb = round(local_path.stat().st_size / 1024, 2)
-        w, h = self._get_image_dimensions(local_path) if media_type == MediaType.IMAGE else (None, None)
+
+        w, h = (None, None)
+        if media_type == MediaType.IMAGE:
+            w, h = self._get_image_dimensions(local_path)
+            if w and h and (w < MIN_IMAGE_WIDTH or h < MIN_IMAGE_HEIGHT):
+                local_path.unlink(missing_ok=True)
+                logger.debug(f"[MediaCollector] Skipped (too small {w}x{h}): {url}")
+                return None
 
         return MediaRecord(
             source_url=url,
@@ -113,11 +153,20 @@ class MediaCollector(BaseCollector):
             height=h,
         )
 
-    def collect_batch(self, urls: list[str] = None, source_type: str = None, date_str: str = None, **kwargs) -> list[MediaRecord]:
+    # ── Public API ─────────────────────────────────────────────────────────
+
+    def collect_batch(
+        self,
+        urls: list[str] = None,
+        source_type: str = None,
+        date_str: str = None,
+        **kwargs,
+    ) -> list[MediaRecord]:
         """
         Two modes:
-          1. Pass urls= directly for standalone use.
-          2. Pass source_type= to extract media_urls from stored records of that type.
+          1. urls=  — download a specific list of URLs directly.
+          2. source_type= — load stored records for that source and extract
+             media_urls only from records that had at least one keyword hit.
         """
         if urls is None:
             urls = []
@@ -125,19 +174,26 @@ class MediaCollector(BaseCollector):
         if source_type:
             stored = self.store.load(source_type, date_str)
             for record in stored:
-                urls.extend(record.get("media_urls", []))
+                # Only pull images from disaster-relevant records
+                if record.get("keywords_hit"):
+                    urls.extend(record.get("media_urls", []))
 
-        urls = list(set(u for u in urls if u))  # deduplicate
-        logger.info(f"[MediaCollector] Attempting to download {len(urls)} media URLs.")
+        urls = list(set(u for u in urls if u))
+        logger.info(f"[MediaCollector] Queued {len(urls)} URLs for download.")
+
+        if not urls:
+            return []
 
         records = []
-        for url in urls:
-            try:
-                record = self._download_one(url)
-                if record:
-                    records.append(record)
-            except Exception as e:
-                logger.error(f"[MediaCollector] Download failed for {url}: {e}")
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            futures = {pool.submit(self._download_one, url): url for url in urls}
+            for future in as_completed(futures):
+                try:
+                    record = future.result()
+                    if record:
+                        records.append(record)
+                except Exception as e:
+                    logger.error(f"[MediaCollector] Unexpected error: {e}")
 
-        logger.info(f"[MediaCollector] Downloaded {len(records)}/{len(urls)} media files.")
+        logger.info(f"[MediaCollector] Saved {len(records)}/{len(urls)} relevant media files.")
         return records

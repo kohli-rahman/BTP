@@ -37,14 +37,24 @@ class TwitterCollector(BaseCollector):
             self._client.get_recent_tweets_count("disaster")  # lightweight probe
             logger.info("[TwitterCollector] Authenticated via Bearer token.")
             return True
+        except tweepy.errors.Forbidden as e:
+            if "402" in str(e) or "credits" in str(e).lower() or "payment" in str(e).lower():
+                logger.warning("[TwitterCollector] Account has no API credits. Upgrade at developer.twitter.com.")
+            else:
+                logger.error(f"[TwitterCollector] Auth failed (403 Forbidden): {e}")
+            return False
         except Exception as e:
             logger.error(f"[TwitterCollector] Auth failed: {e}")
             return False
 
     def _build_query(self, keywords: list[str]) -> str:
-        """Build an OR query with lang:en filter, excluding retweets."""
-        kw_part = " OR ".join(f'"{kw}"' for kw in keywords[:15])  # API max ~512 chars
-        return f"({kw_part}) lang:en -is:retweet"
+        """
+        Build an OR query scoped to India using place_country:IN and
+        lang:en filter, excluding retweets. Twitter place_country filter
+        ensures only geotagged Indian tweets are returned where available.
+        """
+        kw_part = " OR ".join(f'"{kw}"' for kw in keywords[:12])  # API cap ~512 chars
+        return f"({kw_part}) lang:en place_country:IN -is:retweet"
 
     def _parse_tweet(self, tweet, includes: dict) -> RawRecord:
         users = {u.id: u for u in includes.get("users", [])}
