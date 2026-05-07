@@ -216,23 +216,6 @@ data/
 
 ---
 
-### 🔲 Next Up
-
-- [ ] **More data collection** — Run continuously to build up labeled dataset; `EARTHQUAKE` and `DROUGHT` classes currently under-represented
-- [ ] **Twitter activation** — Acquire paid API tier; `place_country:IN` stream is already implemented and waiting
-- [ ] **Manual annotation interface** — Simple labeling tool to create high-confidence benchmark ground truth for model evaluation
-- [ ] **Multimodal fusion (WP2)** — Align sensor readings + social media posts + news articles by time window and location into unified event records
-- [ ] **Situational awareness model (WP3)** — NLP: extract affected locations, damage estimates, population needs from article text
-- [ ] **Event identification model (WP3)** — Cluster historical records into discrete named events (e.g. "Kedarnath Flash Flood June 2024")
-- [ ] **Timeline generation (WP3)** — Chronological sequencing of sub-events within a disaster; graphical visualization
-- [ ] **Knowledge extraction (WP3)** — Formalize community/traditional knowledge sources into structured hazard indicators
-- [ ] **REST API (WP4)** — FastAPI layer over the DuckDB catalog and SQLite store; endpoints for search, bbox, stats, hazard summary
-- [ ] **WebGIS integration (WP4)** — Connect to IIT Roorkee's spatial visualization portal; expose R*Tree spatial queries via API
-- [ ] **Evaluation platform (WP5)** — Automated benchmarking harness for damage assessment, event detection, and timeline generation models
-- [ ] **Use case deployment (WP6)** — End-to-end proof-of-concept for an Uttarakhand disaster scenario
-
----
-
 ## Design Notes
 
 A few non-obvious decisions worth noting:
