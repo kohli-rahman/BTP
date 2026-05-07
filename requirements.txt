@@ -25,3 +25,8 @@ loguru>=0.7.2
 
 # ── Typing (Python 3.9 backport) ────────────────────────────────────────────
 typing-extensions>=4.9.0
+
+# ── WP2 Data Lake ────────────────────────────────────────────────────────────
+pyarrow>=15.0.0         # Parquet read/write (silver zone)
+duckdb>=0.10.0          # In-process OLAP catalog
+pandas>=2.0.0           # DataFrame output for queries

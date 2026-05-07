@@ -3,10 +3,10 @@ WP1 Data Collection Pipeline — Entry Point
 IIT Patna | DST Multi-Hazard Early Warning System
 
 Usage:
-    python -m wp1_data_collection.main batch   [--days N]
-    python -m wp1_data_collection.main stream  [--no-twitter] [--no-reddit] [--no-weather]
-    python -m wp1_data_collection.main collect <source>  (twitter|reddit|news|rss|weather|media)
-    python -m wp1_data_collection.main stats
+    python3 -m wp1_data_collection.main batch   [--days N]
+    python3 -m wp1_data_collection.main stream  [--no-twitter] [--no-reddit] [--no-weather]
+    python3 -m wp1_data_collection.main collect <source>  (twitter|reddit|news|rss|weather|media)
+    python3 -m wp1_data_collection.main stats
 """
 
 import argparse
